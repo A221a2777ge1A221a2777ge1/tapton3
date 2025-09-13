@@ -4,7 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, Rea
 import type { Investment } from '@/lib/types';
 import { useTonWallet } from '@tonconnect/ui-react';
 import { getDbOrNull, ensureAnonymousAuth } from '@/lib/firebase';
-import { doc, getDoc, setDoc, updateDoc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, setDoc as setDocAlias } from 'firebase/firestore';
 
 interface GameState {
   balance: number;
@@ -117,6 +117,13 @@ export const GameStateProvider = ({ children }: { children: ReactNode }) => {
         etBalance: balanceRef.current,
         lastClaimedAt: lastClaimedAtRef.current,
       }).catch(() => {});
+      // Update leaderboard snapshot (non-realtime consumer will query periodically)
+      const lbRef = doc(collection(db, 'leaderboard'), uid);
+      setDocAlias(lbRef, {
+        uid,
+        etBalance: balanceRef.current,
+        updatedAt: Date.now(),
+      }, { merge: true }).catch(() => {});
     }, 5000);
     return () => clearInterval(interval);
   }, [uid]);
@@ -129,6 +136,8 @@ export const GameStateProvider = ({ children }: { children: ReactNode }) => {
     if (db && uid) {
       const ref = doc(db, 'users', uid);
       updateDoc(ref, { etBalance: balance + 1, taps: taps + 1 }).catch(() => {});
+      const lbRef = doc(collection(db, 'leaderboard'), uid);
+      setDocAlias(lbRef, { uid, etBalance: balance + 1, updatedAt: Date.now() }, { merge: true }).catch(() => {});
     }
   }, [balance, taps, uid]);
 
@@ -148,6 +157,8 @@ export const GameStateProvider = ({ children }: { children: ReactNode }) => {
         if (db && uid) {
           const ref = doc(db, 'users', uid);
           updateDoc(ref, { etBalance: newBalance, investments: updated }).catch(() => {});
+          const lbRef = doc(collection(db, 'leaderboard'), uid);
+          setDocAlias(lbRef, { uid, etBalance: newBalance, updatedAt: Date.now() }, { merge: true }).catch(() => {});
         }
         return updated;
       });
