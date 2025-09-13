@@ -1,10 +1,10 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
 import type { Investment } from '@/lib/types';
 import { useTonWallet } from '@tonconnect/ui-react';
 import { getDbOrNull, ensureAnonymousAuth } from '@/lib/firebase';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 
 interface GameState {
   balance: number;
@@ -27,6 +27,12 @@ export const GameStateProvider = ({ children }: { children: ReactNode }) => {
   const [lastClaimedAt, setLastClaimedAt] = useState(Date.now());
   const [uid, setUid] = useState<string | null>(null);
 
+  // Refs for periodic persistence
+  const balanceRef = useRef(balance);
+  const lastClaimedAtRef = useRef(lastClaimedAt);
+  useEffect(() => { balanceRef.current = balance; }, [balance]);
+  useEffect(() => { lastClaimedAtRef.current = lastClaimedAt; }, [lastClaimedAt]);
+
   const passiveIncomePerSec = investments.reduce((total, inv) => total + inv.incomePerSecET * inv.ownedQty, 0);
 
   useEffect(() => {
@@ -38,9 +44,10 @@ export const GameStateProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [wallet]);
 
-  // Load persisted state once Firebase is available
+  // Load persisted state and subscribe once Firebase is available
   useEffect(() => {
     let cancelled = false;
+    let unsub: (() => void) | undefined;
     (async () => {
       const db = getDbOrNull();
       if (!db) return;
@@ -66,12 +73,22 @@ export const GameStateProvider = ({ children }: { children: ReactNode }) => {
             lastClaimedAt: Date.now(),
           });
         }
+        // Subscribe to remote changes for cross-tab/page updates
+        unsub = onSnapshot(ref, (docSnap) => {
+          const data = docSnap.data() as any;
+          if (!data) return;
+          if (typeof data.etBalance === 'number') setBalance(data.etBalance);
+          if (typeof data.taps === 'number') setTaps(data.taps);
+          if (Array.isArray(data.investments)) setInvestments(data.investments);
+          if (typeof data.lastClaimedAt === 'number') setLastClaimedAt(data.lastClaimedAt);
+        });
       } catch (e) {
         // best-effort; ignore
       }
     })();
     return () => {
       cancelled = true;
+      if (unsub) unsub();
     };
   }, []);
 
@@ -90,6 +107,20 @@ export const GameStateProvider = ({ children }: { children: ReactNode }) => {
     return () => clearInterval(interval);
   }, [passiveIncomePerSec, lastClaimedAt]);
 
+  // Periodically persist ticking balance (best-effort)
+  useEffect(() => {
+    const db = getDbOrNull();
+    if (!db || !uid) return;
+    const interval = setInterval(() => {
+      const ref = doc(db, 'users', uid);
+      updateDoc(ref, {
+        etBalance: balanceRef.current,
+        lastClaimedAt: lastClaimedAtRef.current,
+      }).catch(() => {});
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [uid]);
+
   const tap = useCallback(() => {
     // In a real app, this would be a debounced call to a server action
     setBalance(prev => prev + 1);
@@ -99,7 +130,7 @@ export const GameStateProvider = ({ children }: { children: ReactNode }) => {
       const ref = doc(db, 'users', uid);
       updateDoc(ref, { etBalance: balance + 1, taps: taps + 1 }).catch(() => {});
     }
-  }, []);
+  }, [balance, taps, uid]);
 
   const purchaseInvestment = useCallback((investment: Investment): boolean => {
     if (balance >= investment.costET) {
