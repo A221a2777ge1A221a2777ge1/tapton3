@@ -14,6 +14,8 @@ export interface Investment {
   costET: number;
   incomePerSecET: number;
   ownedQty: number;
+  description?: string;
+  riskLevel?: 'Low' | 'Medium' | 'High';
 }
 
 export interface User {

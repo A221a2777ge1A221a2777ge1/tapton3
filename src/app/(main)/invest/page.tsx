@@ -10,7 +10,7 @@ import { useGameState } from '@/hooks/use-game-state';
 import { getInvestmentIdeas } from './actions';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/hooks/use-toast';
-import { HandCoins } from 'lucide-react';
+import { HandCoins, Info } from 'lucide-react';
 
 const categories: InvestmentCategory[] = [
   'RealEstate',
@@ -93,6 +93,12 @@ const InvestmentCard = ({ idea: initialIdea }: { idea: Investment }) => {
                 <CardTitle className="text-lg">{idea.name}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+                {idea.description && (
+                  <div className="text-sm text-muted-foreground flex items-start gap-2">
+                    <Info className="h-4 w-4 mt-0.5" />
+                    <span>{idea.description}</span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center">
                     <span className="text-muted-foreground">Cost</span>
                     <span className="font-bold text-primary">{formatET(idea.costET)}</span>
@@ -101,10 +107,32 @@ const InvestmentCard = ({ idea: initialIdea }: { idea: Investment }) => {
                     <span className="text-muted-foreground">Income</span>
                     <span className="font-bold text-green-400">+{formatET(idea.incomePerSecET)}/s</span>
                 </div>
-                 <div className="flex justify-between items-center">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">Income/hr</span>
+                      <span className="font-medium">{formatET(idea.incomePerSecET * 3600)}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">Income/day</span>
+                      <span className="font-medium">{formatET(idea.incomePerSecET * 86400)}</span>
+                  </div>
+                </div>
+                <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">Payback</span>
+                    <span className="font-medium">
+                      {idea.incomePerSecET > 0 ? `${Math.ceil(idea.costET / idea.incomePerSecET / 3600)}h` : '—'}
+                    </span>
+                </div>
+                <div className="flex justify-between items-center">
                     <span className="text-muted-foreground">Owned</span>
                     <span className="font-bold">{idea.ownedQty}</span>
                 </div>
+                {idea.riskLevel && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">Risk</span>
+                    <span className="font-medium">{idea.riskLevel}</span>
+                  </div>
+                )}
             </CardContent>
             <CardFooter>
                 <Button className="w-full" onClick={handlePurchase} disabled={!canAfford}>
