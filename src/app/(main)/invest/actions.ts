@@ -2,8 +2,9 @@
 
 import { generateInvestmentIdeas } from "@/ai/flows/generate-investment-ideas";
 import type { GenerateInvestmentIdeasOutput } from "@/ai/flows/generate-investment-ideas";
+import type { InvestmentCategory } from "@/lib/types";
 
-export async function getInvestmentIdeas(category: string): Promise<GenerateInvestmentIdeasOutput> {
+export async function getInvestmentIdeas(category: InvestmentCategory): Promise<GenerateInvestmentIdeasOutput> {
   try {
     const ideas = await generateInvestmentIdeas({
       category: category,
