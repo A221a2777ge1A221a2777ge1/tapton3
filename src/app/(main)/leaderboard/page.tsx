@@ -15,7 +15,7 @@ import { collection, getDocs, limit, orderBy, query, where, getCountFromServer }
 export default function LeaderboardPage() {
   const { balance } = useGameState();
   const wallet = useTonWallet();
-  const [top, setTop] = useState<Array<{ uid: string; etBalance: number }>>([]);
+  const [top, setTop] = useState<Array<{ uid: string; address?: string | null; etBalance: number; rank: number }>>([]);
   const [selfRank, setSelfRank] = useState<number | null>(null);
 
   useEffect(() => {
@@ -25,22 +25,32 @@ export default function LeaderboardPage() {
       try {
         const q = query(collection(db, 'leaderboard'), orderBy('etBalance', 'desc'), limit(100));
         const snap = await getDocs(q);
-        const rows: Array<{ uid: string; etBalance: number }> = [];
+        const rows: Array<{ uid: string; address?: string | null; etBalance: number; rank: number }> = [];
+        let index = 0;
         snap.forEach((doc) => {
           const d = doc.data() as any;
-          rows.push({ uid: d.uid || doc.id, etBalance: typeof d.etBalance === 'number' ? d.etBalance : 0 });
+          rows.push({
+            uid: (d && d.uid) || doc.id,
+            address: d?.address ?? null,
+            etBalance: typeof d?.etBalance === 'number' ? d.etBalance : 0,
+            rank: ++index,
+          });
         });
-        setTop(rows);
-        // Compute approximate rank by counting users with greater balance
-        if (wallet?.account.address) {
+        // Compute approximate rank by counting users with greater balance (no realtime)
+        try {
           const allQ = query(collection(db, 'leaderboard'), where('etBalance', '>', balance));
-          try {
-            const countSnap = await getCountFromServer(allQ);
-            setSelfRank(countSnap.data().count + 1);
-          } catch (_) {
-            setSelfRank(null);
-          }
+          const countSnap = await getCountFromServer(allQ);
+          setSelfRank(countSnap.data().count + 1);
+        } catch (_) {
+          setSelfRank(null);
         }
+
+        // If current user is not in top rows and we have an address, append their snapshot
+        const addr = wallet?.account.address || null;
+        if (addr && !rows.some(r => (r.address || r.uid) === addr)) {
+          rows.push({ uid: addr, address: addr, etBalance: balance, rank: (selfRank ?? rows.length + 1) });
+        }
+        setTop(rows);
       } catch (_) {
         setTop([]);
       }
