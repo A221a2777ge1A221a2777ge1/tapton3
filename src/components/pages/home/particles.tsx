@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { ETGoldCoin } from '@/components/icons/et-coin';
 
-const PARTICLE_COUNT = 10;
+const PARTICLE_COUNT = 1;
 
 interface Particle {
   id: number;
@@ -16,7 +16,7 @@ interface ParticlesProps {
 
 const generateParticle = (id: number): Particle => {
   const size = Math.random() * 20 + 10;
-  const angle = Math.random() * 360;
+  const angle = Math.random() * Math.PI * 2;
   const distance = Math.random() * 80 + 80;
   const duration = Math.random() * 0.5 + 0.5;
 

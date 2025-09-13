@@ -14,7 +14,15 @@ export function TapButton() {
   const handleTap = useCallback(() => {
     tap();
     setIsTapped(true);
-    setTapEvents(prev => [...prev, { id: Date.now() + Math.random() }]);
+    const base = Date.now() + Math.random();
+    setTapEvents(prev => [
+      ...prev,
+      { id: base + 0 },
+      { id: base + 1 },
+      { id: base + 2 },
+      { id: base + 3 },
+      { id: base + 4 },
+    ]);
     setTimeout(() => setIsTapped(false), 100);
   }, [tap]);
 
