@@ -1,0 +1,26 @@
+# General / OS
+.DS_Store
+*.log
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Node.js / React / Next.js
+node_modules/
+build/
+dist/
+.next/
+out/
+coverage/
+.pnp
+.pnp.js
+
+# Firebase
+.firebase/
+firebase-debug.log
+
+# IDEs
+.idea/
+.vscode/

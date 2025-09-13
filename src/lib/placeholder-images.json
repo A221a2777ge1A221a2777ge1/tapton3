@@ -1,0 +1,16 @@
+{
+  "placeholderImages": [
+    {
+      "id": "hero-background",
+      "description": "A vibrant abstract gradient for the main background of the app.",
+      "imageUrl": "https://picsum.photos/seed/ettapbg/400/800",
+      "imageHint": "abstract gradient"
+    },
+    {
+      "id": "avatar-placeholder",
+      "description": "A generic placeholder avatar for users on the leaderboard.",
+      "imageUrl": "https://picsum.photos/seed/ettapavatar/100/100",
+      "imageHint": "abstract avatar"
+    }
+  ]
+}
