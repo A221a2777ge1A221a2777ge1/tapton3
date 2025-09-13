@@ -116,17 +116,20 @@ export const GameStateProvider = ({ children }: { children: ReactNode }) => {
       updateDoc(ref, {
         etBalance: balanceRef.current,
         lastClaimedAt: lastClaimedAtRef.current,
+        totalPassiveIncomePerSec: passiveIncomePerSec,
       }).catch(() => {});
       // Update leaderboard snapshot (non-realtime consumer will query periodically)
       const lbRef = doc(collection(db, 'leaderboard'), uid);
       setDocAlias(lbRef, {
         uid,
         etBalance: balanceRef.current,
+        incomePerSec: passiveIncomePerSec,
+        address: wallet?.account.address || null,
         updatedAt: Date.now(),
       }, { merge: true }).catch(() => {});
     }, 5000);
     return () => clearInterval(interval);
-  }, [uid]);
+  }, [uid, passiveIncomePerSec, wallet]);
 
   const tap = useCallback(() => {
     // In a real app, this would be a debounced call to a server action
@@ -135,11 +138,11 @@ export const GameStateProvider = ({ children }: { children: ReactNode }) => {
     const db = getDbOrNull();
     if (db && uid) {
       const ref = doc(db, 'users', uid);
-      updateDoc(ref, { etBalance: balance + 1, taps: taps + 1 }).catch(() => {});
+      updateDoc(ref, { etBalance: balance + 1, taps: taps + 1, totalPassiveIncomePerSec: passiveIncomePerSec }).catch(() => {});
       const lbRef = doc(collection(db, 'leaderboard'), uid);
-      setDocAlias(lbRef, { uid, etBalance: balance + 1, updatedAt: Date.now() }, { merge: true }).catch(() => {});
+      setDocAlias(lbRef, { uid, etBalance: balance + 1, incomePerSec: passiveIncomePerSec, address: wallet?.account.address || null, updatedAt: Date.now() }, { merge: true }).catch(() => {});
     }
-  }, [balance, taps, uid]);
+  }, [balance, taps, uid, passiveIncomePerSec, wallet]);
 
   const purchaseInvestment = useCallback((investment: Investment): boolean => {
     if (balance >= investment.costET) {
@@ -156,16 +159,16 @@ export const GameStateProvider = ({ children }: { children: ReactNode }) => {
         const db = getDbOrNull();
         if (db && uid) {
           const ref = doc(db, 'users', uid);
-          updateDoc(ref, { etBalance: newBalance, investments: updated }).catch(() => {});
+          updateDoc(ref, { etBalance: newBalance, investments: updated, totalPassiveIncomePerSec: passiveIncomePerSec }).catch(() => {});
           const lbRef = doc(collection(db, 'leaderboard'), uid);
-          setDocAlias(lbRef, { uid, etBalance: newBalance, updatedAt: Date.now() }, { merge: true }).catch(() => {});
+          setDocAlias(lbRef, { uid, etBalance: newBalance, incomePerSec: passiveIncomePerSec, address: wallet?.account.address || null, updatedAt: Date.now() }, { merge: true }).catch(() => {});
         }
         return updated;
       });
       return true;
     }
     return false;
-  }, [balance, uid]);
+  }, [balance, uid, passiveIncomePerSec, wallet]);
 
   const value = {
     balance,

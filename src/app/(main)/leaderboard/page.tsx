@@ -10,12 +10,13 @@ import { useTonWallet } from '@tonconnect/ui-react';
 import { Trophy } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { getDbOrNull } from '@/lib/firebase';
-import { collection, getDocs, limit, orderBy, query } from 'firebase/firestore';
+import { collection, getDocs, limit, orderBy, query, where, getCountFromServer } from 'firebase/firestore';
 
 export default function LeaderboardPage() {
   const { balance } = useGameState();
   const wallet = useTonWallet();
   const [top, setTop] = useState<Array<{ uid: string; etBalance: number }>>([]);
+  const [selfRank, setSelfRank] = useState<number | null>(null);
 
   useEffect(() => {
     const db = getDbOrNull();
@@ -30,6 +31,16 @@ export default function LeaderboardPage() {
           rows.push({ uid: d.uid || doc.id, etBalance: typeof d.etBalance === 'number' ? d.etBalance : 0 });
         });
         setTop(rows);
+        // Compute approximate rank by counting users with greater balance
+        if (wallet?.account.address) {
+          const allQ = query(collection(db, 'leaderboard'), where('etBalance', '>', balance));
+          try {
+            const countSnap = await getCountFromServer(allQ);
+            setSelfRank(countSnap.data().count + 1);
+          } catch (_) {
+            setSelfRank(null);
+          }
+        }
       } catch (_) {
         setTop([]);
       }
@@ -41,10 +52,18 @@ export default function LeaderboardPage() {
       <h1 className="text-3xl font-bold mb-6">Leaderboard</h1>
       
       <Card className="mb-6">
-        <CardContent className="p-4 flex justify-between items-center">
+        <CardContent className="p-4 grid grid-cols-3 gap-4 text-center">
           <div>
-            <p className="text-sm text-muted-foreground">Your Balance</p>
-            <p className="text-2xl font-bold text-primary">{formatET(balance)}</p>
+            <p className="text-xs text-muted-foreground">Rank</p>
+            <p className="text-xl font-bold">{selfRank ?? '—'}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Player</p>
+            <p className="text-xl font-bold">{formatAddress(wallet?.account.address || '')}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Balance</p>
+            <p className="text-xl font-bold text-primary">{formatET(balance)}</p>
           </div>
         </CardContent>
       </Card>
