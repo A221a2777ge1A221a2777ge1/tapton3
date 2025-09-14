@@ -1,6 +1,6 @@
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, type Auth, setPersistence, browserLocalPersistence } from 'firebase/auth';
-import { getFirestore, type Firestore } from 'firebase/firestore';
+import { getFirestore, type Firestore, enableIndexedDbPersistence } from 'firebase/firestore';
 
 let appInstance: FirebaseApp | null = null;
 let authInstance: Auth | null = null;
@@ -51,6 +51,8 @@ export function getDbOrNull(): Firestore | null {
   const app = getFirebaseApp();
   if (!app) return null;
   dbInstance = getFirestore(app);
+  // Enable offline persistence best-effort
+  void enableIndexedDbPersistence(dbInstance).catch(() => {});
   return dbInstance;
 }
 
@@ -67,4 +69,10 @@ export async function ensureAnonymousAuth(): Promise<string | null> {
       }
     });
   });
+}
+
+// Utility to prefer wallet address over anon UID when available
+export function selectCanonicalUserId(params: { walletAddress?: string | null; anonUid?: string | null }): string | null {
+  const wallet = params.walletAddress?.toLowerCase();
+  return wallet || params.anonUid || null;
 }

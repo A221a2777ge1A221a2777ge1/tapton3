@@ -1,6 +1,5 @@
 "use server";
 
-import { generateInvestmentIdeas } from "@/ai/flows/generate-investment-ideas";
 import type { GenerateInvestmentIdeasOutput } from "@/ai/flows/generate-investment-ideas";
 import type { InvestmentCategory } from "@/lib/types";
 
@@ -83,17 +82,33 @@ function getFallbackIdeas(category: InvestmentCategory, num: number): GenerateIn
 
 export async function getInvestmentIdeas(category: InvestmentCategory): Promise<GenerateInvestmentIdeasOutput> {
   try {
-    const ideas = await generateInvestmentIdeas({
-      category: category,
-      numIdeas: 6,
+    // Call cached API route to leverage TTL cache
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || '';
+    const url = baseUrl ? `${baseUrl}/api/investment-ideas` : '/api/investment-ideas';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: `category:${category}`, userProfile: { category }, userId: null }),
+      // Revalidate at most hourly on server
+      next: { revalidate: 3600 },
     });
+    if (!res.ok) {
+      return getFallbackIdeas(category, 6);
+    }
+    const data = await res.json();
+    const content = data?.result;
+    let ideas: GenerateInvestmentIdeasOutput | null = null;
+    try {
+      ideas = typeof content === 'string' ? JSON.parse(content) : content;
+    } catch {
+      ideas = null;
+    }
     if (!ideas || ideas.length === 0) {
       return getFallbackIdeas(category, 6);
     }
     return ideas;
   } catch (error) {
     console.error("Error generating investment ideas:", error);
-    // Use deterministic fallback ideas so the page still renders
     return getFallbackIdeas(category, 6);
   }
 }

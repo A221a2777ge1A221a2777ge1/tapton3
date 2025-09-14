@@ -4,7 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, Rea
 import type { Investment } from '@/lib/types';
 import { useTonWallet } from '@tonconnect/ui-react';
 import { getDbOrNull, ensureAnonymousAuth } from '@/lib/firebase';
-import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, setDoc as setDocAlias } from 'firebase/firestore';
+import { doc, getDoc, setDoc, writeBatch, collection } from 'firebase/firestore';
 
 interface GameState {
   balance: number;
@@ -18,6 +18,9 @@ interface GameState {
 const GameStateContext = createContext<GameState | undefined>(undefined);
 
 const TICK_INTERVAL = 1000; // 1 second
+const DEFAULT_PERSIST_MS = Number(process.env.NEXT_PUBLIC_PERSIST_INTERVAL_MS || '') || 60000;
+const LB_DELTA_RATIO = Number(process.env.NEXT_PUBLIC_LEADERBOARD_UPDATE_THRESHOLD || '') || 0.05;
+const ENABLE_NEW_PERSISTENCE = process.env.NEXT_PUBLIC_ENABLE_NEW_PERSISTENCE === 'true' || process.env.NEXT_PUBLIC_ENABLE_NEW_PERSISTENCE === '1';
 
 export const GameStateProvider = ({ children }: { children: ReactNode }) => {
   const wallet = useTonWallet();
@@ -27,10 +30,17 @@ export const GameStateProvider = ({ children }: { children: ReactNode }) => {
   const [lastClaimedAt, setLastClaimedAt] = useState(Date.now());
   const [uid, setUid] = useState<string | null>(null);
 
-  // Refs for periodic persistence
+  // Refs for periodic persistence (local-first)
   const balanceRef = useRef(balance);
+  const tapsRef = useRef(taps);
+  const investmentsRef = useRef(investments);
   const lastClaimedAtRef = useRef(lastClaimedAt);
+  const dirtyRef = useRef(false);
+  const isPersistingRef = useRef(false);
+  const lastPersistedBalanceRef = useRef(0);
   useEffect(() => { balanceRef.current = balance; }, [balance]);
+  useEffect(() => { tapsRef.current = taps; }, [taps]);
+  useEffect(() => { investmentsRef.current = investments; }, [investments]);
   useEffect(() => { lastClaimedAtRef.current = lastClaimedAt; }, [lastClaimedAt]);
 
   const passiveIncomePerSec = investments.reduce((total, inv) => total + inv.incomePerSecET * inv.ownedQty, 0);
@@ -44,26 +54,30 @@ export const GameStateProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [wallet]);
 
-  // Load persisted state and subscribe once Firebase is available
+  // Load persisted state once Firebase is available
   useEffect(() => {
     let cancelled = false;
-    let unsub: (() => void) | undefined;
     (async () => {
       const db = getDbOrNull();
       if (!db) return;
-      const newUid = await ensureAnonymousAuth();
-      if (!newUid) return;
+      const anonUid = await ensureAnonymousAuth();
       if (cancelled) return;
+      // Prefer wallet address (lowercased) as canonical ID
+      const walletAddress = wallet?.account?.address?.toLowerCase();
+      const newUid = walletAddress || anonUid || null;
+      if (!newUid) return;
       setUid(newUid);
       try {
         const ref = doc(db, 'users', newUid);
         const snap = await getDoc(ref);
         if (snap.exists()) {
           const data = snap.data() as any;
-          setBalance(typeof data.etBalance === 'number' ? data.etBalance : 100);
+          const initBalance = typeof data.etBalance === 'number' ? data.etBalance : 100;
+          setBalance(initBalance);
           setTaps(typeof data.taps === 'number' ? data.taps : 0);
           setInvestments(Array.isArray(data.investments) ? data.investments : []);
           setLastClaimedAt(typeof data.lastClaimedAt === 'number' ? data.lastClaimedAt : Date.now());
+          lastPersistedBalanceRef.current = initBalance;
         } else {
           await setDoc(ref, {
             etBalance: 100,
@@ -71,26 +85,19 @@ export const GameStateProvider = ({ children }: { children: ReactNode }) => {
             investments: [],
             totalPassiveIncomePerSec: 0,
             lastClaimedAt: Date.now(),
+            userId: newUid,
+            walletAddress: walletAddress || null,
           });
+          lastPersistedBalanceRef.current = 100;
         }
-        // Subscribe to remote changes for cross-tab/page updates
-        unsub = onSnapshot(ref, (docSnap) => {
-          const data = docSnap.data() as any;
-          if (!data) return;
-          if (typeof data.etBalance === 'number') setBalance(data.etBalance);
-          if (typeof data.taps === 'number') setTaps(data.taps);
-          if (Array.isArray(data.investments)) setInvestments(data.investments);
-          if (typeof data.lastClaimedAt === 'number') setLastClaimedAt(data.lastClaimedAt);
-        });
-      } catch (e) {
+      } catch {
         // best-effort; ignore
       }
     })();
     return () => {
       cancelled = true;
-      if (unsub) unsub();
     };
-  }, []);
+  }, [wallet]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -107,42 +114,59 @@ export const GameStateProvider = ({ children }: { children: ReactNode }) => {
     return () => clearInterval(interval);
   }, [passiveIncomePerSec, lastClaimedAt]);
 
-  // Periodically persist ticking balance (best-effort)
+  // Periodically persist local state using a single batched write
   useEffect(() => {
+    if (!ENABLE_NEW_PERSISTENCE) return;
     const db = getDbOrNull();
     if (!db || !uid) return;
-    const interval = setInterval(() => {
-      const ref = doc(db, 'users', uid);
-      updateDoc(ref, {
-        etBalance: balanceRef.current,
-        lastClaimedAt: lastClaimedAtRef.current,
-        totalPassiveIncomePerSec: passiveIncomePerSec,
-      }).catch(() => {});
-      // Update leaderboard snapshot (non-realtime consumer will query periodically)
-      const lbRef = doc(collection(db, 'leaderboard'), uid);
-      setDocAlias(lbRef, {
-        uid,
-        etBalance: balanceRef.current,
-        incomePerSec: passiveIncomePerSec,
-        address: wallet?.account.address || null,
-        updatedAt: Date.now(),
-      }, { merge: true }).catch(() => {});
-    }, 5000);
+    const interval = setInterval(async () => {
+      if (!dirtyRef.current || isPersistingRef.current) return;
+      try {
+        isPersistingRef.current = true;
+        const batch = writeBatch(db);
+        const userRef = doc(db, 'users', uid);
+        batch.set(userRef, {
+          etBalance: balanceRef.current,
+          taps: tapsRef.current,
+          investments: investmentsRef.current,
+          totalPassiveIncomePerSec: passiveIncomePerSec,
+          lastClaimedAt: lastClaimedAtRef.current,
+          lastPersistedAt: Date.now(),
+          userId: uid,
+          walletAddress: wallet?.account.address?.toLowerCase() || null,
+        }, { merge: true });
+
+        const previous = lastPersistedBalanceRef.current;
+        const current = balanceRef.current;
+        const shouldUpdateLb = previous <= 0 || Math.abs(current - previous) / Math.max(previous, 1) >= LB_DELTA_RATIO;
+        if (shouldUpdateLb) {
+          const lbRef = doc(collection(db, 'leaderboard'), uid);
+          batch.set(lbRef, {
+            uid,
+            etBalance: current,
+            incomePerSec: passiveIncomePerSec,
+            address: wallet?.account.address || null,
+            updatedAt: Date.now(),
+          }, { merge: true });
+        }
+
+        await batch.commit();
+        dirtyRef.current = false;
+        lastPersistedBalanceRef.current = balanceRef.current;
+      } catch {
+        // swallow errors but keep dirty to retry next interval
+      } finally {
+        isPersistingRef.current = false;
+      }
+    }, DEFAULT_PERSIST_MS);
     return () => clearInterval(interval);
   }, [uid, passiveIncomePerSec, wallet]);
 
   const tap = useCallback(() => {
-    // In a real app, this would be a debounced call to a server action
     setBalance(prev => prev + 1);
     setTaps(prev => prev + 1);
-    const db = getDbOrNull();
-    if (db && uid) {
-      const ref = doc(db, 'users', uid);
-      updateDoc(ref, { etBalance: balance + 1, taps: taps + 1, totalPassiveIncomePerSec: passiveIncomePerSec }).catch(() => {});
-      const lbRef = doc(collection(db, 'leaderboard'), uid);
-      setDocAlias(lbRef, { uid, etBalance: balance + 1, incomePerSec: passiveIncomePerSec, address: wallet?.account.address || null, updatedAt: Date.now() }, { merge: true }).catch(() => {});
-    }
-  }, [balance, taps, uid, passiveIncomePerSec, wallet]);
+    dirtyRef.current = true;
+  }, []);
 
   const purchaseInvestment = useCallback((investment: Investment): boolean => {
     if (balance >= investment.costET) {
@@ -155,20 +179,13 @@ export const GameStateProvider = ({ children }: { children: ReactNode }) => {
               i.id === investment.id ? { ...i, ownedQty: i.ownedQty + 1, costET: Math.floor(i.costET * 1.15) } : i
             )
           : [...prevInvestments, { ...investment, ownedQty: 1, costET: Math.floor(investment.costET * 1.15) }];
-        // Persist best-effort
-        const db = getDbOrNull();
-        if (db && uid) {
-          const ref = doc(db, 'users', uid);
-          updateDoc(ref, { etBalance: newBalance, investments: updated, totalPassiveIncomePerSec: passiveIncomePerSec }).catch(() => {});
-          const lbRef = doc(collection(db, 'leaderboard'), uid);
-          setDocAlias(lbRef, { uid, etBalance: newBalance, incomePerSec: passiveIncomePerSec, address: wallet?.account.address || null, updatedAt: Date.now() }, { merge: true }).catch(() => {});
-        }
+        dirtyRef.current = true;
         return updated;
       });
       return true;
     }
     return false;
-  }, [balance, uid, passiveIncomePerSec, wallet]);
+  }, [balance]);
 
   const value = {
     balance,
