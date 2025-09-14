@@ -9,8 +9,8 @@ import { useGameState } from '@/hooks/use-game-state';
 import { useTonWallet } from '@tonconnect/ui-react';
 import { Trophy } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { getDbOrNull } from '@/lib/firebase';
-import { collection, getDocs, limit, orderBy, query, where, getCountFromServer } from 'firebase/firestore';
+import { getDbOrNull, getAuthOrNull } from '@/lib/firebase';
+import { collection, getDocs, limit, orderBy, query, where, getCountFromServer, doc, getDoc } from 'firebase/firestore';
 
 export default function LeaderboardPage() {
   const { balance } = useGameState();
@@ -45,10 +45,27 @@ export default function LeaderboardPage() {
           setSelfRank(null);
         }
 
-        // If current user is not in top rows and we have an address, append their snapshot
-        const addr = wallet?.account.address || null;
-        if (addr && !rows.some(r => (r.address || r.uid) === addr)) {
-          rows.push({ uid: addr, address: addr, etBalance: balance, rank: (selfRank ?? rows.length + 1) });
+        // If current user is not in top rows, append their server snapshot via UID
+        const auth = getAuthOrNull();
+        const currentUid = auth?.currentUser?.uid || null;
+        if (currentUid && !rows.some(r => r.uid === currentUid)) {
+          try {
+            const selfRef = doc(collection(db, 'leaderboard'), currentUid);
+            const selfSnap = await getDoc(selfRef);
+            if (selfSnap.exists()) {
+              const d = selfSnap.data() as any;
+              rows.push({
+                uid: currentUid,
+                address: d?.address ?? wallet?.account.address ?? null,
+                etBalance: typeof d?.etBalance === 'number' ? d.etBalance : balance,
+                rank: (selfRank ?? rows.length + 1),
+              });
+            } else if (wallet?.account.address) {
+              rows.push({ uid: currentUid, address: wallet.account.address, etBalance: balance, rank: (selfRank ?? rows.length + 1) });
+            }
+          } catch (_) {
+            // ignore
+          }
         }
         setTop(rows);
       } catch (_) {

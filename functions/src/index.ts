@@ -18,3 +18,4 @@ export const nextServer = onRequest(
 );
 
 export { migrateOnConnect } from './migrateOnConnect';
+export { persistGameState } from './persistGameState';

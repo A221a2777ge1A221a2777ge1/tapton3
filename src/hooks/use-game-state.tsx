@@ -3,8 +3,8 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
 import type { Investment } from '@/lib/types';
 import { useTonWallet } from '@tonconnect/ui-react';
-import { getDbOrNull, ensureAnonymousAuth } from '@/lib/firebase';
-import { doc, getDoc, setDoc, writeBatch, collection } from 'firebase/firestore';
+import { getDbOrNull, ensureAnonymousAuth, callPersistGameState } from '@/lib/firebase';
+import { doc, getDoc } from 'firebase/firestore';
 
 interface GameState {
   balance: number;
@@ -62,9 +62,9 @@ export const GameStateProvider = ({ children }: { children: ReactNode }) => {
       if (!db) return;
       const anonUid = await ensureAnonymousAuth();
       if (cancelled) return;
-      // Prefer wallet address (lowercased) as canonical ID
-      const walletAddress = wallet?.account?.address?.toLowerCase();
-      const newUid = walletAddress || anonUid || null;
+      // Use authenticated UID as canonical ID; store wallet address as a field only
+      const walletAddress = wallet?.account?.address?.toLowerCase() || null;
+      const newUid = anonUid || null;
       if (!newUid) return;
       setUid(newUid);
       try {
@@ -79,14 +79,13 @@ export const GameStateProvider = ({ children }: { children: ReactNode }) => {
           setLastClaimedAt(typeof data.lastClaimedAt === 'number' ? data.lastClaimedAt : Date.now());
           lastPersistedBalanceRef.current = initBalance;
         } else {
-          await setDoc(ref, {
+          await callPersistGameState({
             etBalance: 100,
             taps: 0,
             investments: [],
             totalPassiveIncomePerSec: 0,
             lastClaimedAt: Date.now(),
-            userId: newUid,
-            walletAddress: walletAddress || null,
+            walletAddress,
           });
           lastPersistedBalanceRef.current = 100;
         }
@@ -114,7 +113,7 @@ export const GameStateProvider = ({ children }: { children: ReactNode }) => {
     return () => clearInterval(interval);
   }, [passiveIncomePerSec, lastClaimedAt]);
 
-  // Periodically persist local state using a single batched write
+  // Periodically persist local state using a callable function
   useEffect(() => {
     if (!ENABLE_NEW_PERSISTENCE) return;
     const db = getDbOrNull();
@@ -123,34 +122,14 @@ export const GameStateProvider = ({ children }: { children: ReactNode }) => {
       if (!dirtyRef.current || isPersistingRef.current) return;
       try {
         isPersistingRef.current = true;
-        const batch = writeBatch(db);
-        const userRef = doc(db, 'users', uid);
-        batch.set(userRef, {
+        await callPersistGameState({
           etBalance: balanceRef.current,
           taps: tapsRef.current,
           investments: investmentsRef.current,
           totalPassiveIncomePerSec: passiveIncomePerSec,
           lastClaimedAt: lastClaimedAtRef.current,
-          lastPersistedAt: Date.now(),
-          userId: uid,
           walletAddress: wallet?.account.address?.toLowerCase() || null,
-        }, { merge: true });
-
-        const previous = lastPersistedBalanceRef.current;
-        const current = balanceRef.current;
-        const shouldUpdateLb = previous <= 0 || Math.abs(current - previous) / Math.max(previous, 1) >= LB_DELTA_RATIO;
-        if (shouldUpdateLb) {
-          const lbRef = doc(collection(db, 'leaderboard'), uid);
-          batch.set(lbRef, {
-            uid,
-            etBalance: current,
-            incomePerSec: passiveIncomePerSec,
-            address: wallet?.account.address || null,
-            updatedAt: Date.now(),
-          }, { merge: true });
-        }
-
-        await batch.commit();
+        });
         dirtyRef.current = false;
         lastPersistedBalanceRef.current = balanceRef.current;
       } catch {

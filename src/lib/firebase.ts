@@ -1,10 +1,12 @@
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, type Auth, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { getFirestore, type Firestore, enableIndexedDbPersistence } from 'firebase/firestore';
+import { getFunctions, type Functions, httpsCallable, connectFunctionsEmulator } from 'firebase/functions';
 
 let appInstance: FirebaseApp | null = null;
 let authInstance: Auth | null = null;
 let dbInstance: Firestore | null = null;
+let functionsInstance: Functions | null = null;
 
 function hasFirebaseEnv(): boolean {
   return Boolean(
@@ -56,6 +58,22 @@ export function getDbOrNull(): Firestore | null {
   return dbInstance;
 }
 
+export function getFunctionsOrNull(): Functions | null {
+  if (functionsInstance) return functionsInstance;
+  const app = getFirebaseApp();
+  if (!app) return null;
+  functionsInstance = getFunctions(app);
+  // Optional emulator support in development
+  if (process.env.NEXT_PUBLIC_USE_FUNCTIONS_EMULATOR === 'true') {
+    try {
+      connectFunctionsEmulator(functionsInstance, '127.0.0.1', Number(process.env.NEXT_PUBLIC_FUNCTIONS_EMULATOR_PORT || 5001));
+    } catch {
+      // ignore
+    }
+  }
+  return functionsInstance;
+}
+
 export async function ensureAnonymousAuth(): Promise<string | null> {
   const auth = getAuthOrNull();
   if (!auth) return null;
@@ -74,5 +92,26 @@ export async function ensureAnonymousAuth(): Promise<string | null> {
 // Utility to prefer wallet address over anon UID when available
 export function selectCanonicalUserId(params: { walletAddress?: string | null; anonUid?: string | null }): string | null {
   const wallet = params.walletAddress?.toLowerCase();
-  return wallet || params.anonUid || null;
+  // Always prefer authenticated UID for Firestore document IDs to satisfy rules
+  // Wallet address should be stored as a field, not used as the doc ID
+  return params.anonUid || wallet || null;
+}
+
+// Callable wrappers
+export async function callPersistGameState(data: {
+  etBalance: number;
+  taps: number;
+  investments: unknown[];
+  totalPassiveIncomePerSec: number;
+  lastClaimedAt: number;
+  walletAddress: string | null;
+}): Promise<void> {
+  const fn = getFunctionsOrNull();
+  if (!fn) return;
+  try {
+    const callable = httpsCallable(fn, 'persistGameState');
+    await callable(data);
+  } catch {
+    // best-effort
+  }
 }
