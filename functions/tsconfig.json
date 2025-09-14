@@ -2,9 +2,9 @@
   "compilerOptions": {
     "outDir": "lib",
     "rootDir": "src",
-    "module": "ESNext",
+    "module": "commonjs",
     "target": "ES2022",
-    "moduleResolution": "Bundler",
+    "moduleResolution": "node",
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
