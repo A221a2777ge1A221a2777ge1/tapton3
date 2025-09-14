@@ -1,0 +1,2 @@
+export { migrateAnonToWallet } from './migrateOnConnect';
+
