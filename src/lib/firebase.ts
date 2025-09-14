@@ -62,7 +62,8 @@ export function getFunctionsOrNull(): Functions | null {
   if (functionsInstance) return functionsInstance;
   const app = getFirebaseApp();
   if (!app) return null;
-  functionsInstance = getFunctions(app);
+  const region = process.env.NEXT_PUBLIC_FUNCTIONS_REGION || 'us-central1';
+  functionsInstance = getFunctions(app, region);
   // Optional emulator support in development
   if (process.env.NEXT_PUBLIC_USE_FUNCTIONS_EMULATOR === 'true') {
     try {
