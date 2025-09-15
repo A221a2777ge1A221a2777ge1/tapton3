@@ -11,7 +11,7 @@ const server = next({
 const nextjsHandle = server.getRequestHandler();
 
 export const nextServer = onRequest(
-    { minInstances: 1, region: 'us-central1' }, 
+    { minInstances: 0, region: 'us-central1' }, 
     (req, res) => {
         return server.prepare().then(() => nextjsHandle(req, res));
     }

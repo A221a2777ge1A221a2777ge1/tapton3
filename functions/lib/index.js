@@ -12,7 +12,7 @@ const server = (0, next_1.default)({
     conf: { distDir: '.next' },
 });
 const nextjsHandle = server.getRequestHandler();
-exports.nextServer = (0, https_1.onRequest)({ minInstances: 1, region: 'us-central1' }, (req, res) => {
+exports.nextServer = (0, https_1.onRequest)({ minInstances: 0, region: 'us-central1' }, (req, res) => {
     return server.prepare().then(() => nextjsHandle(req, res));
 });
 var migrateOnConnect_1 = require("./migrateOnConnect");
